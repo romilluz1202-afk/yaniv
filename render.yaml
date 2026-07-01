@@ -1,0 +1,11 @@
+# Render Blueprint — service יחיד שמגיש את הלקוח + שרת Colyseus על אותו port
+services:
+  - type: web
+    name: yaniv
+    runtime: node
+    plan: free
+    buildCommand: npm --prefix client install && npm --prefix client run build && npm --prefix server install
+    startCommand: npm --prefix server start
+    envVars:
+      - key: NODE_VERSION
+        value: '20'

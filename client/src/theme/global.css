@@ -1,0 +1,140 @@
+/* עיצוב גלובלי — לבד ירוק קלאסי, מסגרות זהב, RTL */
+:root {
+  --felt: #0b4d34;
+  --felt-dark: #073a27;
+  --felt-deep: #052a1c;
+  --gold: #caa04a;
+  --gold-bright: #e6c983;
+  --gold-dim: #8a6d2c;
+  --cream: #fbfaf5;
+  --card-red: #b3132b;
+  --card-black: #1a1a1a;
+  --back: #7a1f2b;
+  --text-light: #f4e6c1;
+  --danger: #c0392b;
+  --shadow: rgba(0, 0, 0, 0.45);
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Heebo', system-ui, sans-serif;
+  color: var(--text-light);
+  background: radial-gradient(ellipse at 50% 40%, #0f6543 0%, #0b4d34 46%, #063a27 100%);
+  overflow: hidden;
+  user-select: none;
+  direction: rtl;
+  overscroll-behavior: none;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 900;
+}
+
+/* כפתור זהב ראשי */
+.btn-gold {
+  background: linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 55%, var(--gold-dim) 100%);
+  color: #2a2006;
+  font-weight: 700;
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  font-size: 17px;
+  box-shadow: 0 3px 0 var(--gold-dim), 0 5px 14px var(--shadow);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.btn-gold:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--gold-dim), 0 2px 8px var(--shadow);
+}
+.btn-gold:disabled {
+  filter: grayscale(0.6) brightness(0.7);
+  cursor: default;
+  box-shadow: none;
+}
+
+/* כפתור מתאר */
+.btn-ghost {
+  border: 1.5px solid var(--gold);
+  color: var(--text-light);
+  border-radius: var(--radius);
+  padding: 13px 18px;
+  font-size: 15px;
+  font-weight: 500;
+  background: rgba(0, 0, 0, 0.18);
+  transition: background 0.12s ease, transform 0.08s ease;
+}
+.btn-ghost:active {
+  transform: translateY(1px);
+  background: rgba(0, 0, 0, 0.3);
+}
+.btn-ghost:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* שדה קלט */
+.field {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1.5px solid var(--gold-dim);
+  border-radius: var(--radius);
+  color: var(--cream);
+  font-size: 18px;
+  padding: 14px 16px;
+  text-align: center;
+  outline: none;
+  font-family: inherit;
+}
+.field:focus {
+  border-color: var(--gold-bright);
+}
+.field::placeholder {
+  color: rgba(244, 230, 193, 0.4);
+}
+
+/* כותרת בזהב מוברש */
+.title-gold {
+  color: var(--gold-bright);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  letter-spacing: 1px;
+}
+
+@keyframes pulse-gold {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(230, 201, 131, 0.5), 0 3px 0 var(--gold-dim);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(230, 201, 131, 0), 0 3px 0 var(--gold-dim);
+  }
+}
+.pulse {
+  animation: pulse-gold 1.4s ease-in-out infinite;
+}
