@@ -86,12 +86,17 @@ function sortForRun(cards: Card[]): Card[] {
   });
 }
 
-// אילו קלפים מהזריקה הקודמת ניתן להרים: הקצה הראשון והאחרון בלבד.
-// עבור קלף בודד — אותו קלף. עבור סט/רצף — שני הקצוות (ללא כפילות).
-export function pickableCards(prevDiscard: Card[]): Card[] {
-  if (prevDiscard.length === 0) return [];
-  if (prevDiscard.length === 1) return [prevDiscard[0]];
-  const first = prevDiscard[0];
-  const last = prevDiscard[prevDiscard.length - 1];
-  return first.id === last.id ? [first] : [first, last];
+// אילו קלפים מהזריקה הקודמת ניתן להרים:
+// בודד — אותו קלף. סט — כל הקלפים. רצף — רק הקצה הראשון והאחרון.
+// קלפים שהודבקו (slapped) לעולם אינם ניתנים למשיכה — רק מה שהונח לפני ההדבקה.
+export function pickableCards(
+  prevDiscard: Card[],
+  kind: ComboKind = 'single',
+  slappedIds: string[] = []
+): Card[] {
+  const live = prevDiscard.filter((c) => !slappedIds.includes(c.id));
+  if (live.length === 0) return [];
+  if (live.length === 1) return [live[0]];
+  if (kind === 'run') return [live[0], live[live.length - 1]];
+  return live; // single / set — הכל
 }

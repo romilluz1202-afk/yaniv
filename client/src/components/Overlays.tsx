@@ -1,12 +1,28 @@
-// שכבות-על: הכרזת יניב/אסף, לוח תוצאות סיבוב, ומסך סיום משחק
-import { useEffect } from 'react';
+// שכבות-על: הכרזת יניב/אסף (עם קול), טבלת ניקוד עם ספירה חיה, ומסך סיום משחק
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNet } from '../net/colyseus';
 import { getPlayers } from '../game/state';
-import { Card } from './Card';
-import { sfx } from '../game/sfx';
+import { sfx, buzz } from '../game/sfx';
 
-// ---- הכרזת יניב / אסף ----
+// ספירה חיה של מספר (ease-out)
+function useCountUp(target: number, dur = 900, delay = 0) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const t0 = performance.now() + delay;
+    const step = (t: number) => {
+      const p = Math.min(1, Math.max(0, (t - t0) / dur));
+      setV(Math.round(target * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, dur, delay]);
+  return v;
+}
+
+// ---- הכרזת יניב / אסף — פס דרמטי חוצה מסך + קול ----
 export function Announce() {
   const announce = useNet((s) => s.announce);
   const clearAnnounce = useNet((s) => s.clearAnnounce);
@@ -14,15 +30,21 @@ export function Announce() {
 
   useEffect(() => {
     if (!announce) return;
-    if (announce.type === 'yaniv') sfx.yaniv();
-    else sfx.asaf();
-    const t = setTimeout(clearAnnounce, 1500);
+    if (announce.type === 'yaniv') {
+      sfx.yaniv();
+      buzz([60, 40, 120]);
+    } else {
+      sfx.asaf();
+      buzz([120, 60, 200]);
+    }
+    const t = setTimeout(clearAnnounce, 1800);
     return () => clearTimeout(t);
   }, [announce, clearAnnounce]);
 
   const name = announce
     ? getPlayers(room.state).find((p) => p.id === announce.playerId)?.name || ''
     : '';
+  const isAsaf = announce?.type === 'asaf';
 
   return (
     <AnimatePresence>
@@ -30,27 +52,52 @@ export function Announce() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 30, pointerEvents: 'none', background: 'rgba(0,0,0,0.25)' }}
+          exit={{ opacity: 0, transition: { duration: 0.25 } }}
+          style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40, pointerEvents: 'none' }}
         >
+          {/* פס אלכסוני חוצה מסך */}
           <motion.div
-            initial={{ scale: 0.4, rotate: -8 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 16 }}
-            style={{ textAlign: 'center' }}
+            initial={{ x: '110%', skewX: -8 }}
+            animate={{ x: 0, skewX: -8 }}
+            exit={{ x: '-110%' }}
+            transition={{ type: 'spring', stiffness: 240, damping: 24 }}
+            style={{
+              position: 'absolute',
+              insetInline: -30,
+              height: 130,
+              background: isAsaf
+                ? 'linear-gradient(90deg, transparent, rgba(143,20,10,0.95) 18%, rgba(143,20,10,0.95) 82%, transparent)'
+                : 'linear-gradient(90deg, transparent, rgba(20,20,14,0.92) 18%, rgba(20,20,14,0.92) 82%, transparent)',
+              borderTop: `2px solid ${isAsaf ? '#ff8f7f' : 'var(--gold-bright)'}`,
+              borderBottom: `2px solid ${isAsaf ? '#ff8f7f' : 'var(--gold-bright)'}`,
+            }}
+          />
+          <motion.div
+            initial={{ scale: 0.3, rotate: -6, opacity: 0 }}
+            animate={{ scale: [0.3, 1.15, 1], rotate: 0, opacity: 1 }}
+            transition={{ duration: 0.45, times: [0, 0.7, 1], ease: 'easeOut' }}
+            style={{ textAlign: 'center', position: 'relative' }}
           >
             <div
               style={{
-                fontSize: 68,
+                fontSize: 74,
                 fontWeight: 900,
-                color: announce.type === 'yaniv' ? 'var(--gold-bright)' : '#ff7a6a',
-                textShadow: '0 4px 18px rgba(0,0,0,0.7)',
-                letterSpacing: 2,
+                color: isAsaf ? '#ff8f7f' : 'var(--gold-bright)',
+                textShadow: '0 4px 22px rgba(0,0,0,0.8)',
+                letterSpacing: 3,
+                lineHeight: 1,
               }}
             >
-              {announce.type === 'yaniv' ? 'יניב!' : 'אסף!'}
+              {isAsaf ? 'אסף!' : 'יניב!'}
             </div>
-            <div style={{ fontSize: 20, marginTop: 4, color: 'var(--cream)' }}>{name}</div>
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              style={{ fontSize: 21, marginTop: 8, color: 'var(--cream)', fontWeight: 500 }}
+            >
+              {name}
+            </motion.div>
           </motion.div>
         </motion.div>
       )}
@@ -58,8 +105,44 @@ export function Announce() {
   );
 }
 
-// ---- לוח תוצאות סיבוב ----
-export function RoundResult() {
+// שורת שחקן בטבלת הניקוד
+function ScoreRow({ r, name, isWinner, isAsafCaller, index }: any) {
+  const delta = useCountUp(r.roundScore, 800, 500 + index * 120);
+  const total = useCountUp(r.totalScore, 1000, 700 + index * 120);
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 40 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.12, type: 'spring', stiffness: 300, damping: 26 }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        background: isWinner ? 'rgba(202,160,74,0.2)' : 'rgba(0,0,0,0.32)',
+        border: `1.5px solid ${isWinner ? 'var(--gold-bright)' : 'var(--gold-dim)'}`,
+        borderRadius: 12,
+        padding: '12px 14px',
+      }}
+    >
+      <span style={{ fontSize: 20, width: 26, textAlign: 'center' }}>
+        {isWinner ? '🏆' : isAsafCaller ? '💥' : ''}
+      </span>
+      <span style={{ fontWeight: 700, flex: 1, fontSize: 16 }}>
+        {name}
+        {r.eliminated && <span style={{ color: '#ff8f7f', fontSize: 12, marginInlineStart: 6 }}>הודח</span>}
+      </span>
+      <span style={{ fontSize: 14, minWidth: 46, textAlign: 'center', color: r.roundScore > 0 ? '#ff9a8a' : 'var(--gold-bright)', fontWeight: 700, direction: 'ltr', display: 'inline-block' }}>
+        {r.roundScore > 0 ? `+${delta}` : '0'}
+      </span>
+      <span style={{ fontSize: 18, minWidth: 44, textAlign: 'center', fontWeight: 900, color: 'var(--gold-bright)' }}>
+        {total}
+      </span>
+    </motion.div>
+  );
+}
+
+// ---- טבלת ניקוד סוף-סיבוב (אחרי שלב החשיפה בשולחן) ----
+export function ScorePanel() {
   const room = useNet((s) => s.room)!;
   const sessionId = useNet((s) => s.sessionId);
   const continueGame = useNet((s) => s.continueGame);
@@ -72,10 +155,10 @@ export function RoundResult() {
   const players = getPlayers(state);
   const nameOf = (id: string) => players.find((p) => p.id === id)?.name || '';
 
-  // המארח מקדם אוטומטית לסיבוב הבא אחרי 5 שניות (קצב מהיר, ללא מריחה)
+  // מארח מקדם אוטומטית אחרי 8 שניות (אפשר גם ידנית)
   useEffect(() => {
     if (!isHost) return;
-    const t = setTimeout(continueGame, 5000);
+    const t = setTimeout(continueGame, 8000);
     return () => clearTimeout(t);
   }, [isHost, continueGame]);
 
@@ -85,62 +168,55 @@ export function RoundResult() {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 30 }}
-      animate={{ opacity: 1, y: 0 }}
-      style={{ position: 'absolute', inset: 0, zIndex: 25, background: 'rgba(4,26,17,0.94)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 20, gap: 12, overflowY: 'auto' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      style={{ position: 'absolute', inset: 0, zIndex: 30, background: 'rgba(4,26,17,0.95)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 20, overflowY: 'auto' }}
     >
-      <h2 className="title-gold" style={{ fontSize: 26, marginTop: 8 }}>
-        {rr.asaf ? 'אסף! 🎯' : 'יניב! 🏆'}
-      </h2>
-      <p style={{ margin: 0, fontSize: 15, opacity: 0.85, textAlign: 'center' }}>
+      <motion.h2
+        initial={{ y: -18, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="title-gold"
+        style={{ fontSize: 27, marginTop: 10 }}
+      >
+        {rr.asaf ? '💥 אסף!' : '🏆 יניב!'}
+      </motion.h2>
+      <p style={{ margin: '6px 0 14px', fontSize: 14.5, opacity: 0.85, textAlign: 'center' }}>
         {rr.asaf
-          ? `${nameOf(rr.callerId)} הכריז אבל ל${nameOf(rr.asafById)} היה פחות`
-          : `${nameOf(rr.winnerId)} זכה בסיבוב`}
+          ? `${nameOf(rr.callerId)} הכריז על ${rr.callerValue} — אבל ל${nameOf(rr.asafById)} היה פחות (+30 עונש)`
+          : `${nameOf(rr.callerId)} הכריז יניב על ${rr.callerValue} וזכה בסיבוב`}
       </p>
 
-      <div style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
-        {results.map((r: any) => {
-          const hand: any[] = [];
-          r.hand?.forEach((c: any) => hand.push(c));
-          const isWinner = r.playerId === rr.winnerId;
-          return (
-            <div
-              key={r.playerId}
-              style={{
-                background: isWinner ? 'rgba(202,160,74,0.18)' : 'rgba(0,0,0,0.3)',
-                border: `1.5px solid ${isWinner ? 'var(--gold-bright)' : 'var(--gold-dim)'}`,
-                borderRadius: 12,
-                padding: '10px 12px',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontWeight: 700 }}>
-                  {nameOf(r.playerId)} {r.eliminated && <span style={{ color: '#ff8f7f', fontSize: 12 }}>· הודח</span>}
-                </span>
-                <span style={{ fontSize: 13 }}>
-                  <span style={{ color: r.roundScore > 0 ? '#ff9a8a' : 'var(--gold-bright)' }}>
-                    +{r.roundScore}
-                  </span>{' '}
-                  <span style={{ opacity: 0.6 }}>→ {r.totalScore}</span>
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                {hand.map((c: any) => (
-                  <Card key={c.id} card={{ id: c.id, suit: c.suit || null, rank: c.rank, joker: c.joker }} w={30} />
-                ))}
-              </div>
-            </div>
-          );
-        })}
+      <div style={{ width: '100%', maxWidth: 340, display: 'flex', gap: 10, fontSize: 11.5, opacity: 0.6, padding: '0 14px 4px', justifyContent: 'flex-end' }}>
+        <span style={{ minWidth: 46, textAlign: 'center' }}>סיבוב</span>
+        <span style={{ minWidth: 44, textAlign: 'center' }}>סה"כ</span>
+      </div>
+      <div style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {results.map((r: any, i: number) => (
+          <ScoreRow
+            key={r.playerId}
+            r={r}
+            index={i}
+            name={nameOf(r.playerId)}
+            isWinner={r.playerId === rr.winnerId}
+            isAsafCaller={rr.asaf && r.playerId === rr.callerId}
+          />
+        ))}
       </div>
 
       <div style={{ flex: 1 }} />
       {isHost ? (
-        <button className="btn-gold pulse" style={{ maxWidth: 340, width: '100%' }} onClick={continueGame}>
-          סיבוב הבא
-        </button>
+        <motion.button
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 1.2 }}
+          className="btn-gold pulse"
+          style={{ maxWidth: 340, width: '100%' }}
+          onClick={continueGame}
+        >
+          סיבוב הבא ←
+        </motion.button>
       ) : (
-        <div style={{ opacity: 0.8, padding: 12 }}>ממתין למארח לסיבוב הבא…</div>
+        <div style={{ opacity: 0.8, padding: 12, fontSize: 14 }}>הסיבוב הבא מתחיל עוד רגע…</div>
       )}
     </motion.div>
   );
@@ -158,27 +234,58 @@ export function GameOver() {
 
   useEffect(() => {
     sfx.win();
+    buzz([80, 50, 80, 50, 160]);
   }, []);
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      style={{ position: 'absolute', inset: 0, zIndex: 40, background: 'rgba(4,26,17,0.97)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14 }}
+      style={{ position: 'absolute', inset: 0, zIndex: 45, background: 'rgba(4,26,17,0.97)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 14 }}
     >
-      <div style={{ fontSize: 60 }}>🏆</div>
-      <h1 className="title-gold" style={{ fontSize: 36 }}>{winner?.name} ניצח!</h1>
-      <div style={{ width: '100%', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+      <motion.div
+        initial={{ scale: 0, rotate: -20 }}
+        animate={{ scale: 1, rotate: 0 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 14, delay: 0.15 }}
+        style={{ fontSize: 74 }}
+      >
+        🏆
+      </motion.div>
+      <motion.h1
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+        className="title-gold"
+        style={{ fontSize: 34, textAlign: 'center' }}
+      >
+        {winner?.name} ניצח!
+      </motion.h1>
+      <div style={{ width: '100%', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
         {players.map((p, i) => (
-          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--gold-dim)', borderRadius: 10, padding: '10px 14px' }}>
-            <span>{i + 1}. {p.name}</span>
-            <span style={{ color: 'var(--gold-bright)' }}>{p.score} נק'</span>
-          </div>
+          <motion.div
+            key={p.id}
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.55 + i * 0.12 }}
+            style={{ display: 'flex', justifyContent: 'space-between', background: i === 0 ? 'rgba(202,160,74,0.2)' : 'rgba(0,0,0,0.3)', border: `1px solid ${i === 0 ? 'var(--gold-bright)' : 'var(--gold-dim)'}`, borderRadius: 10, padding: '11px 14px' }}
+          >
+            <span style={{ fontWeight: i === 0 ? 700 : 400 }}>
+              {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`} {p.name}
+            </span>
+            <span style={{ color: 'var(--gold-bright)', fontWeight: 700 }}>{p.score} נק'</span>
+          </motion.div>
         ))}
       </div>
-      <button className="btn-gold" style={{ maxWidth: 320, width: '100%', marginTop: 12 }} onClick={leave}>
+      <motion.button
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 1.2 }}
+        className="btn-gold"
+        style={{ maxWidth: 320, width: '100%', marginTop: 12 }}
+        onClick={leave}
+      >
         חזרה לתפריט
-      </button>
+      </motion.button>
     </motion.div>
   );
 }

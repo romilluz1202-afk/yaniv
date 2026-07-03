@@ -9,7 +9,7 @@ import {
   orderForDiscard,
 } from './combos';
 import { resolveRound, applyExactScore, isEliminated } from './scoring';
-import { createGame, startRound, discardAndDraw, currentPlayer, canYaniv } from './round';
+import { createGame, startRound, discardAndDraw, currentPlayer, canYaniv, slapDown, currentPickable } from './round';
 
 // עזר ליצירת קלף לבדיקות
 function card(suit: Suit | null, rank: Rank, joker = false): Card {
@@ -95,17 +95,24 @@ describe('validateDiscard', () => {
 describe('pickableCards / orderForDiscard', () => {
   it('single: the one card', () => {
     const c = card('S', 7);
-    expect(pickableCards([c]).map((x) => x.id)).toEqual(['S7']);
+    expect(pickableCards([c], 'single').map((x) => x.id)).toEqual(['S7']);
   });
-  it('run: only first and last ends', () => {
+  it('run: only first and last ends — middles are locked', () => {
     const run = orderForDiscard([card('S', 6), card('S', 4), card('S', 5)], 'run');
     expect(run.map((c) => c.rank)).toEqual([4, 5, 6]);
-    const ends = pickableCards(run).map((c) => c.rank);
+    const ends = pickableCards(run, 'run').map((c) => c.rank);
     expect(ends).toEqual([4, 6]);
   });
-  it('set: two ends', () => {
+  it('set: ALL cards are pickable, including middle', () => {
     const set = [card('S', 9), card('H', 9), card('D', 9)];
-    expect(pickableCards(set).length).toBe(2);
+    const picks = pickableCards(set, 'set');
+    expect(picks.length).toBe(3);
+    expect(picks.map((c) => c.id)).toContain('H9');
+  });
+  it('slapped cards are never pickable', () => {
+    const set = [card('S', 9), card('H', 9), card('D', 9)];
+    const picks = pickableCards(set, 'set', ['D9']);
+    expect(picks.map((c) => c.id)).toEqual(['S9', 'H9']);
   });
 });
 
@@ -199,13 +206,39 @@ describe('round flow', () => {
     expect(() => discardAndDraw(g, notCurrent.id, [notCurrent.hand[0].id], 'deck')).toThrow();
   });
 
-  it('can pick up a card from the previous discard end', () => {
+  it('can pick up a specific card from the previous discard', () => {
     const g = createGame([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], undefined, 1);
     startRound(g);
     const prevTop = g.discard[g.discard.length - 1];
     const p = currentPlayer(g);
-    discardAndDraw(g, p.id, [p.hand[0].id], 'discard-last');
+    discardAndDraw(g, p.id, [p.hand[0].id], 'discard', prevTop.id);
     expect(p.hand.some((c) => c.id === prevTop.id)).toBe(true);
+  });
+
+  it('rejects picking a card that is not pickable (run middle)', () => {
+    const g = createGame([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], undefined, 1);
+    startRound(g);
+    const p1 = currentPlayer(g);
+    // בונים יד מלאכותית עם רצף וזורקים אותו
+    p1.hand = [card('S', 4), card('S', 5), card('S', 6), card('H', 2), card('D', 9)];
+    discardAndDraw(g, p1.id, ['S4', 'S5', 'S6'], 'deck');
+    const p2 = currentPlayer(g);
+    // אמצע הרצף (S5) נעול
+    expect(() => discardAndDraw(g, p2.id, [p2.hand[0].id], 'discard', 'S5')).toThrow('invalid-pickup');
+    // קצה הרצף (S6) חוקי
+    discardAndDraw(g, p2.id, [p2.hand[0].id], 'discard', 'S6');
+    expect(p2.hand.some((c) => c.id === 'S6')).toBe(true);
+  });
+
+  it('allows picking the middle card of a set', () => {
+    const g = createGame([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], undefined, 1);
+    startRound(g);
+    const p1 = currentPlayer(g);
+    p1.hand = [card('S', 9), card('H', 9), card('D', 9), card('C', 2), card('C', 3)];
+    discardAndDraw(g, p1.id, ['S9', 'H9', 'D9'], 'deck');
+    const p2 = currentPlayer(g);
+    discardAndDraw(g, p2.id, [p2.hand[0].id], 'discard', 'H9');
+    expect(p2.hand.some((c) => c.id === 'H9')).toBe(true);
   });
 
   it('conserves 54 cards and reshuffles pile when deck empties (long game)', () => {
@@ -236,5 +269,78 @@ describe('round flow', () => {
     expect(canYaniv(g, p.id)).toBe(true);
     const other = g.players.find((x) => x.id !== p.id)!;
     expect(canYaniv(g, other.id)).toBe(false);
+  });
+});
+
+describe('slapdown (הדבקה)', () => {
+  // עזר: משחק שבו לשחקן הנוכחי יש 7♠ והקלף הבא בקופה הוא 7♥
+  function slapSetup() {
+    const g = createGame([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], undefined, 1);
+    startRound(g);
+    const p = currentPlayer(g);
+    p.hand = [card('S', 7), card('H', 2), card('D', 3), card('C', 4), card('C', 9)];
+    g.deck.push(card('H', 7)); // deck.pop() ימשוך את זה
+    return { g, p };
+  }
+
+  it('opens a slap window when deck draw matches discarded rank', () => {
+    const { g, p } = slapSetup();
+    const res = discardAndDraw(g, p.id, ['S7'], 'deck');
+    expect(res.slapOpened).toBe(true);
+    expect(g.slapWindow).toEqual({ playerId: p.id, cardId: 'H7' });
+  });
+
+  it('does NOT open a window when ranks differ or drawn from discard', () => {
+    const g = createGame([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], undefined, 1);
+    startRound(g);
+    const p = currentPlayer(g);
+    p.hand = [card('S', 7), card('H', 2), card('D', 3), card('C', 4), card('C', 9)];
+    g.deck.push(card('H', 8)); // ערך שונה
+    const res = discardAndDraw(g, p.id, ['S7'], 'deck');
+    expect(res.slapOpened).toBe(false);
+    expect(g.slapWindow).toBeNull();
+  });
+
+  it('slapDown moves the card to discard as non-pickable; pre-slap cards stay pickable', () => {
+    const { g, p } = slapSetup();
+    discardAndDraw(g, p.id, ['S7'], 'deck');
+    const slapped = slapDown(g, p.id, 'H7');
+    expect(slapped.id).toBe('H7');
+    expect(p.hand.length).toBe(4); // 5 - 1 זריקה + 1 משיכה - 1 הדבקה
+    expect(g.discard.map((c) => c.id)).toEqual(['S7', 'H7']);
+    // הקלף המודבק לא ניתן למשיכה; ה-7♠ המקורי כן
+    const picks = currentPickable(g).map((c) => c.id);
+    expect(picks).toEqual(['S7']);
+  });
+
+  it('window closes when the next player plays', () => {
+    const { g, p } = slapSetup();
+    discardAndDraw(g, p.id, ['S7'], 'deck');
+    const p2 = currentPlayer(g);
+    discardAndDraw(g, p2.id, [p2.hand[0].id], 'deck');
+    expect(g.slapWindow).toBeNull();
+    expect(() => slapDown(g, p.id, 'H7')).toThrow('no-slap');
+  });
+
+  it('rejects slap by wrong player or wrong card', () => {
+    const { g, p } = slapSetup();
+    discardAndDraw(g, p.id, ['S7'], 'deck');
+    const other = g.players.find((x) => x.id !== p.id)!;
+    expect(() => slapDown(g, other.id, 'H7')).toThrow('no-slap');
+    expect(() => slapDown(g, p.id, 'H2')).toThrow('wrong-slap-card');
+  });
+
+  it('slapped card is buried on the next discard (card conservation)', () => {
+    const { g, p } = slapSetup();
+    discardAndDraw(g, p.id, ['S7'], 'deck');
+    slapDown(g, p.id, 'H7');
+    const p2 = currentPlayer(g);
+    discardAndDraw(g, p2.id, [p2.hand[0].id], 'deck');
+    // גם S7 וגם H7 נקברו ב-pile
+    expect(g.pile.some((c) => c.id === 'S7')).toBe(true);
+    expect(g.pile.some((c) => c.id === 'H7')).toBe(true);
+    const total =
+      g.players.reduce((s, x) => s + x.hand.length, 0) + g.deck.length + g.discard.length + g.pile.length;
+    expect(total).toBe(55); // 54 + הקלף ששתלנו ידנית בקופה
   });
 });

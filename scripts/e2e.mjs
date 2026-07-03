@@ -2,7 +2,7 @@
 // מריצים מול שרת חי על localhost:2567. משתמש ב-colyseus.js מתיקיית הלקוח.
 import { Client } from '../client/node_modules/colyseus.js/build/esm/index.mjs';
 
-const ENDPOINT = 'ws://localhost:2567';
+const ENDPOINT = process.env.YANIV_URL || 'ws://localhost:2567';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function value(card) {

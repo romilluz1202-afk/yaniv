@@ -11,6 +11,9 @@ const MAP: Record<string, string> = {
   'cannot-call-yaniv': 'אי אפשר להכריז יניב עכשיו',
   'deck-empty': 'הקופה ריקה',
   'nothing-to-pick': 'אין קלף להרים',
+  'invalid-pickup': 'את הקלף הזה אי אפשר לקחת',
+  'no-slap': 'חלון ההדבקה נסגר',
+  'wrong-slap-card': 'אפשר להדביק רק את הקלף שנמשך',
 };
 
 export function heError(code: string | null): string {

@@ -14,19 +14,21 @@ import {
   createGame,
   startRound,
   discardAndDraw,
+  slapDown,
+  currentPickable,
   currentPlayer,
   activePlayers,
   canYaniv,
 } from '../engine/round';
 import { resolveRound } from '../engine/scoring';
-import { handValue, pickableCards, canCallYaniv } from '../engine/combos';
+import { handValue } from '../engine/combos';
 import { cardValue } from '../engine/deck';
 import {
   Card,
-  DrawSource,
   DEFAULT_CONFIG,
   MSG,
   DiscardMessage,
+  SlapMessage,
   GameConfig,
 } from '../../../shared/types';
 
@@ -52,6 +54,7 @@ export class YanivRoom extends Room<GameState> {
       this.handleConfig(client, msg)
     );
     this.onMessage('discard', (client, msg: DiscardMessage) => this.handleDiscard(client, msg));
+    this.onMessage('slap', (client, msg: SlapMessage) => this.handleSlap(client, msg));
     this.onMessage('yaniv', (client) => this.handleYaniv(client));
     this.onMessage('continue', (client) => this.handleContinue(client));
   }
@@ -145,20 +148,41 @@ export class YanivRoom extends Room<GameState> {
       const discardedCards = msg.cardIds
         .map((id) => cur.hand.find((c) => c.id === id))
         .filter(Boolean) as Card[];
-      const result = discardAndDraw(this.engine, client.sessionId, msg.cardIds, msg.drawSource);
+      const result = discardAndDraw(
+        this.engine,
+        client.sessionId,
+        msg.cardIds,
+        msg.drawSource,
+        msg.pickupId
+      );
       this.broadcast(MSG.ANIM, {
         type: 'discard',
         playerId: client.sessionId,
         cards: discardedCards,
       });
+      // משיכה מהערימה היא מידע פומבי — כולם רואים איזה קלף נלקח.
+      // משיכה מהקופה נשארת חסויה (הקלף לא נשלח).
       this.broadcast(MSG.ANIM, {
         type: 'draw',
         playerId: client.sessionId,
         source: msg.drawSource,
+        card: msg.drawSource === 'discard' ? result.drawn : undefined,
       });
       this.syncPublic();
       this.sendHand(client.sessionId);
       this.startTurnTimer();
+    } catch (e: any) {
+      client.send(MSG.ERROR, { reason: e.message });
+    }
+  }
+
+  private handleSlap(client: Client, msg: SlapMessage) {
+    if (this.state.phase !== 'playing') return;
+    try {
+      const card = slapDown(this.engine, client.sessionId, msg.cardId);
+      this.broadcast(MSG.ANIM, { type: 'slap', playerId: client.sessionId, card });
+      this.syncPublic();
+      this.sendHand(client.sessionId);
     } catch (e: any) {
       client.send(MSG.ERROR, { reason: e.message });
     }
@@ -171,6 +195,7 @@ export class YanivRoom extends Room<GameState> {
       return;
     }
     this.clearTurnTimer();
+    this.engine.slapWindow = null; // ההכרזה סוגרת כל חלון הדבקה
     const active = activePlayers(this.engine);
     const out = resolveRound(
       active.map((p) => ({ playerId: p.id, hand: p.hand, previousScore: p.score })),
@@ -188,8 +213,7 @@ export class YanivRoom extends Room<GameState> {
       if (res.eliminated) ep.out = true;
     }
 
-    this.writeRoundResult(active, out);
-    this.state.phase = 'roundEnd';
+    this.writeRoundResult(out);
     this.syncPublic();
 
     // בדיקת סיום משחק — נשאר שחקן אחד פעיל
@@ -197,8 +221,10 @@ export class YanivRoom extends Room<GameState> {
     if (remaining.length <= 1) {
       this.state.gameWinnerId = remaining[0]?.id || out.winnerId;
       this.state.phase = 'gameOver';
-      this.syncPublic();
+    } else {
+      this.state.phase = 'roundEnd';
     }
+    this.syncPublic();
   }
 
   private handleContinue(client: Client) {
@@ -260,6 +286,7 @@ export class YanivRoom extends Room<GameState> {
 
     if (this.engine) {
       this.state.deckCount = this.engine.deck.length;
+      this.state.discardKind = this.engine.discardKind;
       // עדכון שחקנים
       for (const ep of this.engine.players) {
         const ps = this.state.players.get(ep.id);
@@ -269,8 +296,9 @@ export class YanivRoom extends Room<GameState> {
         ps.out = ep.out;
         ps.isTurn = ep.id === curId;
       }
-      // ערימת זריקה ציבורית עם דגל pickable לקצוות
-      const pickable = new Set(pickableCards(this.engine.discard).map((c) => c.id));
+      // ערימת זריקה ציבורית עם דגלי pickable/slapped
+      const pickable = new Set(currentPickable(this.engine).map((c) => c.id));
+      const slapped = new Set(this.engine.slappedIds);
       this.state.discard.clear();
       for (const c of this.engine.discard) {
         const cs = new CardState();
@@ -279,12 +307,13 @@ export class YanivRoom extends Room<GameState> {
         cs.rank = c.rank;
         cs.joker = c.joker;
         cs.pickable = pickable.has(c.id);
+        cs.slapped = slapped.has(c.id);
         this.state.discard.push(cs);
       }
     }
   }
 
-  private writeRoundResult(active: { id: string }[], out: ReturnType<typeof resolveRound>) {
+  private writeRoundResult(out: ReturnType<typeof resolveRound>) {
     const rr = this.state.roundResult;
     rr.callerId = out.callerId;
     rr.callerValue = out.callerValue;
@@ -321,13 +350,15 @@ export class YanivRoom extends Room<GameState> {
     const ep = this.engine?.players.find((p) => p.id === sessionId);
     const client = this.clients.find((c) => c.sessionId === sessionId);
     if (!ep || !client) return;
-    // canYaniv תלוי-ערך בלבד (≤סף) — בדיקת התור נעשית בצד הלקוח מול ה-state הציבורי,
+    // canYaniv תלוי-ערך בלבד (≤סף) — בדיקת התור נעשית בלקוח מול ה-state הציבורי,
     // וה-authority האמיתי הוא handleYaniv בשרת
     const value = handValue(ep.hand);
+    const win = this.engine.slapWindow;
     client.send(MSG.HAND, {
       cards: ep.hand,
       value,
       canYaniv: value <= this.state.yanivThreshold,
+      slapCardId: win && win.playerId === sessionId ? win.cardId : null,
     });
   }
 }

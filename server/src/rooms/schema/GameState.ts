@@ -7,6 +7,7 @@ export class CardState extends Schema {
   @type('number') rank = 0;
   @type('boolean') joker = false;
   @type('boolean') pickable = false; // האם ניתן להרים קלף זה מהזריקה
+  @type('boolean') slapped = false; // קלף שהודבק — מוצג בהיסט, לא ניתן למשיכה
 }
 
 export class PlayerState extends Schema {
@@ -56,6 +57,7 @@ export class GameState extends Schema {
   @type('number') scoreLimit = 200;
   @type('number') maxPlayers = 4;
   @type('string') gameWinnerId = '';
+  @type('string') discardKind = 'single'; // single | set | run — משפיע על פריסת הערימה
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
   @type([CardState]) discard = new ArraySchema<CardState>();
   @type(RoundResultState) roundResult = new RoundResultState();

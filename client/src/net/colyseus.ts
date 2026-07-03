@@ -1,17 +1,11 @@
 // שכבת רשת — חיבור Colyseus + zustand store שמשקף את מצב המשחק ל-React
 import { create } from 'zustand';
 import { Client, Room } from 'colyseus.js';
-import type { Card, DrawSource, AnimEvent } from '@shared/types';
+import type { Card, DrawSource, AnimEvent, PrivateHand } from '@shared/types';
 import { MSG } from '@shared/types';
 
 // כתובת השרת: בפיתוח מול פורט Colyseus, בייצור אותו origin
 const SERVER_HTTP = import.meta.env.DEV ? 'http://localhost:2567' : window.location.origin;
-
-interface HandMsg {
-  cards: Card[];
-  value: number;
-  canYaniv: boolean;
-}
 
 export interface Announce {
   type: 'yaniv' | 'asaf';
@@ -28,15 +22,20 @@ interface NetStore {
   hand: Card[];
   handValue: number;
   canYaniv: boolean;
+  slapCardId: string | null; // קלף שניתן להדביק עכשיו
   error: string | null;
+  errorSeq: number;
   announce: Announce | null;
+  lastAnim: AnimEvent | null; // האירוע האחרון — Table מאזין לפי animSeq
+  animSeq: number;
   connecting: boolean;
 
   createRoom: (name: string) => Promise<void>;
   joinRoom: (code: string, name: string) => Promise<void>;
   start: () => void;
   setConfig: (config: { yanivThreshold?: number; scoreLimit?: number }) => void;
-  discard: (cardIds: string[], drawSource: DrawSource) => void;
+  discard: (cardIds: string[], drawSource: DrawSource, pickupId?: string) => void;
+  slap: (cardId: string) => void;
   callYaniv: () => void;
   continueGame: () => void;
   leave: () => void;
@@ -60,17 +59,23 @@ function wireRoom(room: Room, set: (p: Partial<NetStore>) => void, get: () => Ne
     set({ stateVersion: get().stateVersion + 1 });
   });
 
-  room.onMessage(MSG.HAND, (msg: HandMsg) => {
-    set({ hand: msg.cards, handValue: msg.value, canYaniv: msg.canYaniv });
+  room.onMessage(MSG.HAND, (msg: PrivateHand) => {
+    set({
+      hand: msg.cards,
+      handValue: msg.value,
+      canYaniv: msg.canYaniv,
+      slapCardId: msg.slapCardId ?? null,
+    });
   });
 
   room.onMessage(MSG.ERROR, (msg: { reason: string }) => {
-    set({ error: msg.reason });
+    set({ error: msg.reason, errorSeq: get().errorSeq + 1 });
   });
 
   room.onMessage(MSG.ANIM, (ev: AnimEvent) => {
     if (ev.type === 'yaniv') set({ announce: { type: 'yaniv', playerId: ev.playerId, ts: Date.now() } });
     if (ev.type === 'asaf') set({ announce: { type: 'asaf', playerId: ev.playerId, ts: Date.now() } });
+    set({ lastAnim: ev, animSeq: get().animSeq + 1 });
   });
 
   room.onError((code, message) => set({ error: message || `error-${code}` }));
@@ -86,8 +91,12 @@ export const useNet = create<NetStore>((set, get) => ({
   hand: [],
   handValue: 0,
   canYaniv: false,
+  slapCardId: null,
   error: null,
+  errorSeq: 0,
   announce: null,
+  lastAnim: null,
+  animSeq: 0,
   connecting: false,
 
   createRoom: async (name: string) => {
@@ -120,12 +129,14 @@ export const useNet = create<NetStore>((set, get) => ({
 
   start: () => get().room?.send('start'),
   setConfig: (config) => get().room?.send('config', { config }),
-  discard: (cardIds, drawSource) => get().room?.send('discard', { cardIds, drawSource }),
+  discard: (cardIds, drawSource, pickupId) =>
+    get().room?.send('discard', { cardIds, drawSource, pickupId }),
+  slap: (cardId) => get().room?.send('slap', { cardId }),
   callYaniv: () => get().room?.send('yaniv'),
   continueGame: () => get().room?.send('continue'),
   leave: () => {
     get().room?.leave();
-    set({ room: null, connected: false, hand: [], stateVersion: 0 });
+    set({ room: null, connected: false, hand: [], stateVersion: 0, slapCardId: null });
   },
   clearError: () => set({ error: null }),
   clearAnnounce: () => set({ announce: null }),

@@ -17,8 +17,8 @@ export interface Card {
 // סוג הזריקה: קלף בודד / סט / רצף
 export type ComboKind = 'single' | 'set' | 'run';
 
-// מקור המשיכה: מהקופה או מקצה של הזריקה הקודמת
-export type DrawSource = 'deck' | 'discard-first' | 'discard-last';
+// מקור המשיכה: מהקופה או קלף ספציפי מהזריקה הקודמת
+export type DrawSource = 'deck' | 'discard';
 
 // שלב המשחק
 export type Phase = 'lobby' | 'playing' | 'roundEnd' | 'gameOver';
@@ -57,23 +57,35 @@ export const DEFAULT_CONFIG: GameConfig = {
 
 // ----- הודעות client → server -----
 export interface JoinMessage { name: string; }
-export interface DiscardMessage { cardIds: string[]; drawSource: DrawSource; }
+export interface DiscardMessage {
+  cardIds: string[];
+  drawSource: DrawSource;
+  pickupId?: string; // חובה כאשר drawSource='discard' — איזה קלף בדיוק לוקחים
+}
+export interface SlapMessage { cardId: string; } // הדבקה
 export interface ConfigMessage { config: Partial<GameConfig>; }
 
 // ----- הודעות server → client -----
 export const MSG = {
   HAND: 'hand', // יד פרטית לשחקן (נשלח ל-client בודד)
   ERROR: 'error', // פעולה לא חוקית
-  ANIM: 'anim', // אירוע אנימציה (זריקה/משיכה/הכרזה)
+  ANIM: 'anim', // אירוע אנימציה (זריקה/משיכה/הכרזה/הדבקה)
 } as const;
 
-// אירוע אנימציה שהשרת משדר כדי שהלקוחות יסנכרנו תנועות
+// אירוע אנימציה שהשרת משדר כדי שהלקוחות יסנכרנו תנועות.
+// card נכלל במשיכה מהערימה (מידע פומבי!) — כך כולם רואים מה נלקח.
 export type AnimEvent =
   | { type: 'discard'; playerId: string; cards: Card[] }
-  | { type: 'draw'; playerId: string; source: DrawSource }
+  | { type: 'draw'; playerId: string; source: DrawSource; card?: Card }
+  | { type: 'slap'; playerId: string; card: Card }
   | { type: 'yaniv'; playerId: string }
   | { type: 'asaf'; playerId: string }
   | { type: 'deal' };
 
 // יד פרטית שנשלחת רק לבעליה
-export interface PrivateHand { cards: Card[]; }
+export interface PrivateHand {
+  cards: Card[];
+  value: number;
+  canYaniv: boolean;
+  slapCardId: string | null; // קלף שניתן להדביק עכשיו (מהבהב ביד)
+}
