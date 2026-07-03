@@ -1,0 +1,44 @@
+# דופק חינמי: מפנג את שרת ה-Render כל ~10 דקות כדי שלא יירדם (spin-down אחרי 15 דק' ללא תנועה).
+# בנוסף, קומיט חותמת שבועי מונע מ-GitHub להשבית את ה-cron אחרי 60 יום ללא פעילות בריפו.
+# כתובת השרת נקראת ממשתנה הריפו YANIV_URL — עדכון בלי לגעת בקוד: gh variable set YANIV_URL
+# בטיחות: אין שימוש בקלט לא-מהימן; ה-URL מוזרק דרך env עם ציטוט מלא.
+name: keepalive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # פינג
+    - cron: '0 3 * * 1' # חותמת שבועית (שני 03:00 UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ping:
+    if: github.event.schedule != '0 3 * * 1'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Yaniv server
+        env:
+          URL: ${{ vars.YANIV_URL }}
+        run: |
+          if [ -z "$URL" ]; then
+            echo "YANIV_URL variable not set yet — skipping"
+            exit 0
+          fi
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 25 "$URL/api/health" || echo "000")
+          echo "pinged $URL -> HTTP $code"
+
+  touch:
+    if: github.event.schedule == '0 3 * * 1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit keepalive timestamp
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/keepalive
+          git config user.name "keepalive-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/keepalive
+          git commit -m "chore: keepalive timestamp [skip ci]" || echo "nothing to commit"
+          git push
