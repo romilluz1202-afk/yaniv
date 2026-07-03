@@ -4,8 +4,11 @@ services:
     name: yaniv
     runtime: node
     plan: free
-    buildCommand: npm --prefix client install && npm --prefix client run build && npm --prefix server install
+    # --include=dev: כלי הבנייה של הלקוח (vite/tsc) הם devDependencies,
+    # ו-Render מגדיר NODE_ENV=production שמדלג עליהם בלי הדגל הזה
+    buildCommand: npm --prefix client install --include=dev && npm --prefix client run build && npm --prefix server install
     startCommand: npm --prefix server start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
         value: '20'
